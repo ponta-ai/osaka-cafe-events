@@ -1,6 +1,10 @@
 from pathlib import Path
 
-events = [
+from src.fetch_events import filter_cafe_events
+
+
+# Webサイトから取得する代わりに、今はこのテスト用データを使用します。
+test_events = [
     {
         "title": "朝のゆる交流会",
         "venue": "ドトールコーヒーショップ 大阪駅前店",
@@ -40,7 +44,20 @@ events = [
             "基本操作や簡単なプロンプト作成を体験します。"
         ),
     },
+    {
+        "title": "大阪の歴史を学ぶ講演会",
+        "venue": "大阪市中央公会堂",
+        "date": "2026年8月20日 14:00",
+        "fee": "無料",
+        "capacity": "50名",
+        "category": "学び・文化",
+        "summary": "大阪の歴史を専門家から学ぶ講演会",
+        "description": "大阪のまちの成り立ちと歴史について紹介します。",
+    },
 ]
+
+# 会場名を調べ、カフェで開催されるイベントだけを抽出します。
+cafe_events = filter_cafe_events(test_events)
 
 html_parts = [
     """<!DOCTYPE html>
@@ -78,7 +95,7 @@ h1 {
 """
 ]
 
-for event in events:
+for event in cafe_events:
     html_parts.append(
         f"""
 <section class="event">
@@ -113,3 +130,4 @@ output_file = output_dir / "osaka_cafe_events.html"
 output_file.write_text("".join(html_parts), encoding="utf-8")
 
 print(f"HTMLを生成しました: {output_file}")
+print(f"抽出結果: 全{len(test_events)}件のうちカフェ会場は{len(cafe_events)}件です")
