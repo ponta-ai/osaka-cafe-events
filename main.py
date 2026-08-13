@@ -1,66 +1,27 @@
+from html import escape
 from pathlib import Path
+from typing import Optional
 
-from src.fetch_events import filter_cafe_events
+from src.fetch_events import (
+    EventFetchError,
+    fetch_event_details,
+    fetch_osaka_events,
+    print_detail_results,
+)
 
 
-# Webサイトから取得する代わりに、今はこのテスト用データを使用します。
-test_events = [
-    {
-        "title": "朝のゆる交流会",
-        "venue": "ドトールコーヒーショップ 大阪駅前店",
-        "date": "2026年8月3日 10:00",
-        "fee": "500円",
-        "capacity": "8名",
-        "category": "交流・友達作り",
-        "summary": "少人数で気軽に会話する友達作り交流会",
-        "description": (
-            "少人数でコーヒーを飲みながら、最近興味を持っていることや"
-            "休日の過ごし方について自由に話す交流会です。"
-        ),
-    },
-    {
-        "title": "朝の読書シェア会",
-        "venue": "スターバックス コーヒー 梅田中央店",
-        "date": "2026年8月6日 8:00",
-        "fee": "無料",
-        "capacity": "6名",
-        "category": "勉強会・読書会",
-        "summary": "最近読んだ本の内容や感想を共有する少人数読書会",
-        "description": (
-            "各自が最近読んだ本を持ち寄り、印象に残った部分や"
-            "学んだことを参加者同士で共有します。"
-        ),
-    },
-    {
-        "title": "初心者向け生成AIミニ勉強会",
-        "venue": "梅田駅近くのカフェ",
-        "date": "2026年8月12日 19:00",
-        "fee": "1,000円",
-        "capacity": "5名",
-        "category": "AI・IT・技術",
-        "summary": "生成AIの基本操作と活用例を学ぶ初心者向け勉強会",
-        "description": (
-            "ChatGPTなどの生成AIを初めて使う人を対象に、"
-            "基本操作や簡単なプロンプト作成を体験します。"
-        ),
-    },
-    {
-        "title": "大阪の歴史を学ぶ講演会",
-        "venue": "大阪市中央公会堂",
-        "date": "2026年8月20日 14:00",
-        "fee": "無料",
-        "capacity": "50名",
-        "category": "学び・文化",
-        "summary": "大阪の歴史を専門家から学ぶ講演会",
-        "description": "大阪のまちの成り立ちと歴史について紹介します。",
-    },
-]
+OUTPUT_FILE = Path("output/osaka_cafe_events.html")
 
-# 会場名を調べ、カフェで開催されるイベントだけを抽出します。
-cafe_events = filter_cafe_events(test_events)
 
-html_parts = [
-    """<!DOCTYPE html>
+def display_value(value: Optional[str]) -> str:
+    """取得できなかった値を「不明」にし、HTML用に安全な文字列へ変換する。"""
+    return escape(value.strip()) if isinstance(value, str) and value.strip() else "不明"
+
+
+def build_events_html(events: list[dict]) -> str:
+    """カフェイベント一覧から、既存デザインを保ったHTMLを組み立てる。"""
+    html_parts = [
+        """<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -88,46 +49,78 @@ h1 {
     padding: 10px;
     border-left: 4px solid #6f4e37;
 }
+.event-link {
+    color: #5b3d2b;
+}
 </style>
 </head>
 <body>
 <h1>大阪のカフェ利用イベント調査</h1>
 """
-]
+    ]
 
-for event in cafe_events:
-    html_parts.append(
-        f"""
+    if not events:
+        html_parts.append("<p>カフェ会場のイベントは見つかりませんでした。</p>")
+
+    for event in events:
+        title = display_value(event.get("title"))
+        url = display_value(event.get("url"))
+        date = display_value(event.get("date"))
+        venue = display_value(event.get("venue"))
+        fee = display_value(event.get("fee"))
+        capacity = display_value(event.get("capacity"))
+        description = display_value(event.get("description"))
+
+        html_parts.append(
+            f"""
 <section class="event">
-    <h2>{event["title"]}</h2>
-    <p><strong>開催場所：</strong>{event["venue"]}</p>
-    <p><strong>開催日時：</strong>{event["date"]}</p>
-    <p><strong>参加費：</strong>{event["fee"]}</p>
-    <p><strong>定員：</strong>{event["capacity"]}</p>
+    <h2>{title}</h2>
+    <p><strong>開催場所：</strong>{venue}</p>
+    <p><strong>開催日時：</strong>{date}</p>
+    <p><strong>参加費：</strong>{fee}</p>
+    <p><strong>定員：</strong>{capacity}</p>
 
     <h3>内容</h3>
-    <p>{event["description"]}</p>
+    <p class="summary">{description}</p>
 
-    <h3>内容の短い要約</h3>
-    <p class="summary">{event["summary"]}</p>
-
-    <p><strong>カテゴリ：</strong>{event["category"]}</p>
+    <p><strong>イベントURL：</strong>
+        <a class="event-link" href="{url}" rel="noopener noreferrer">{url}</a>
+    </p>
 </section>
 """
-    )
+        )
 
-html_parts.append(
-    """
+    html_parts.append(
+        """
 </body>
 </html>
 """
-)
+    )
+    return "".join(html_parts)
 
-output_dir = Path("output")
-output_dir.mkdir(exist_ok=True)
 
-output_file = output_dir / "osaka_cafe_events.html"
-output_file.write_text("".join(html_parts), encoding="utf-8")
+def write_events_html(events: list[dict], output_file: Path = OUTPUT_FILE) -> None:
+    """出力先フォルダを用意し、イベントHTMLを保存する。"""
+    output_file.parent.mkdir(exist_ok=True)
+    output_file.write_text(build_events_html(events), encoding="utf-8")
 
-print(f"HTMLを生成しました: {output_file}")
-print(f"抽出結果: 全{len(test_events)}件のうちカフェ会場は{len(cafe_events)}件です")
+
+def main() -> int:
+    """一覧の先頭5イベントだけ、詳細情報とカフェ判定を確認する。"""
+    try:
+        events = fetch_osaka_events()
+        print(f"一覧ページの取得結果: 重複除去後{len(events)}件")
+
+        # 詳細ページは必ず先頭5件まで、各アクセスの間隔は1秒以上にします。
+        details = fetch_event_details(events, limit=5, interval_seconds=1.0)
+    except EventFetchError as exc:
+        print(f"取得エラー: {exc}")
+        return 1
+
+    print(f"詳細ページの取得結果: {len(details)}件\n")
+    print_detail_results(details)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
