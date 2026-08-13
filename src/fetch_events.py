@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup, Tag
 # 取得先やHTML解析の設定を一か所に集め、サイト側の変更に対応しやすくします。
 OSAKA_EVENTS_URL = "https://www.kokuchpro.com/s/area-%E5%A4%A7%E9%98%AA%E5%BA%9C/"
 REQUEST_TIMEOUT_SECONDS = 10
+MAX_DETAIL_EVENTS = 20
 REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -428,12 +429,14 @@ def parse_event_detail(html: str, url: str) -> dict:
 
 def fetch_event_details(
     events: list[dict],
-    limit: int = 5,
+    limit: int = MAX_DETAIL_EVENTS,
     interval_seconds: float = 1.0,
 ) -> list[dict]:
-    """先頭5件までの詳細を、1秒以上の間隔を空けて取得する。"""
-    if limit > 5:
-        raise ValueError("安全確認のため、詳細ページは最大5件までです。")
+    """先頭20件までの詳細を、1秒以上の間隔を空けて取得する。"""
+    if limit > MAX_DETAIL_EVENTS:
+        raise ValueError(
+            f"安全確認のため、詳細ページは最大{MAX_DETAIL_EVENTS}件までです。"
+        )
     if interval_seconds < 1.0:
         raise ValueError("詳細ページへのアクセス間隔は1秒以上にしてください。")
 

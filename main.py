@@ -1,21 +1,23 @@
 from html import escape
 from pathlib import Path
-from typing import Optional
 
 from src.fetch_events import (
     EventFetchError,
     fetch_event_details,
     fetch_osaka_events,
-    print_detail_results,
+    filter_cafe_events,
 )
 
 
 OUTPUT_FILE = Path("output/osaka_cafe_events.html")
 
 
-def display_value(value: Optional[str]) -> str:
+def display_value(value) -> str:
     """取得できなかった値を「不明」にし、HTML用に安全な文字列へ変換する。"""
-    return escape(value.strip()) if isinstance(value, str) and value.strip() else "不明"
+    if value is None:
+        return "不明"
+    text = str(value).strip()
+    return escape(text) if text else "不明"
 
 
 def build_events_html(events: list[dict]) -> str:
@@ -106,19 +108,28 @@ def write_events_html(events: list[dict], output_file: Path = OUTPUT_FILE) -> No
 
 
 def main() -> int:
-    """一覧の先頭5イベントだけ、詳細情報とカフェ判定を確認する。"""
+    """先頭20イベントの詳細からカフェ会場だけをHTMLへ出力する。"""
     try:
         events = fetch_osaka_events()
-        print(f"一覧ページの取得結果: 重複除去後{len(events)}件")
-
-        # 詳細ページは必ず先頭5件まで、各アクセスの間隔は1秒以上にします。
-        details = fetch_event_details(events, limit=5, interval_seconds=1.0)
+        # 詳細ページは必ず先頭20件まで、各アクセスの間隔は1秒以上にします。
+        details = fetch_event_details(events, limit=20, interval_seconds=1.0)
     except EventFetchError as exc:
         print(f"取得エラー: {exc}")
         return 1
 
-    print(f"詳細ページの取得結果: {len(details)}件\n")
-    print_detail_results(details)
+    cafe_events = filter_cafe_events(details)
+    write_events_html(cafe_events)
+
+    print(f"一覧イベント数：{len(events)}件")
+    print(f"詳細ページ確認数：{len(details)}件")
+    print(f"カフェ判定数：{len(cafe_events)}件")
+    print(f"生成HTML：{OUTPUT_FILE}")
+    print("カフェと判定された会場名一覧：")
+    if cafe_events:
+        for event in cafe_events:
+            print(f"- {event.get('venue') or '不明'}")
+    else:
+        print("- なし")
     return 0
 
 
