@@ -11,7 +11,6 @@ from bs4 import BeautifulSoup, Tag
 # 取得先やHTML解析の設定を一か所に集め、サイト側の変更に対応しやすくします。
 OSAKA_EVENTS_URL = "https://www.kokuchpro.com/s/area-%E5%A4%A7%E9%98%AA%E5%BA%9C/"
 REQUEST_TIMEOUT_SECONDS = 10
-MAX_DETAIL_EVENTS = 20
 REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -101,6 +100,19 @@ ACCESS_RESTRICTION_MARKERS = (
 
 class EventFetchError(RuntimeError):
     """イベント一覧を安全に取得できなかった場合のエラー。"""
+
+
+class AccessRestrictionError(EventFetchError):
+    """403、429、CAPTCHAなどのアクセス制限を検出した場合のエラー。"""
+
+
+class DetailFetchResults(list):
+    """取得できた詳細と、取得失敗の情報をまとめて保持するリスト。"""
+
+    def __init__(self):
+        super().__init__()
+        self.failures = []
+        self.stopped_reason = None
 
 
 # カフェを表す一般的な言葉です。
@@ -211,8 +223,8 @@ def fetch_detail_page(
     except requests.RequestException as exc:
         raise EventFetchError(f"詳細ページの取得に失敗しました: {url} ({exc})") from exc
 
-    if response.status_code in (401, 403, 429):
-        raise EventFetchError(
+    if response.status_code in (403, 429):
+        raise AccessRestrictionError(
             "サイトのアクセス制限により詳細ページを取得できませんでした: "
             f"HTTP {response.status_code} {url}"
         )
@@ -231,7 +243,9 @@ def fetch_detail_page(
 
     normalized_html = response.text.casefold()
     if any(marker.casefold() in normalized_html for marker in ACCESS_RESTRICTION_MARKERS):
-        raise EventFetchError(f"CAPTCHAまたはアクセス制限画面を検出しました: {url}")
+        raise AccessRestrictionError(
+            f"CAPTCHAまたはアクセス制限画面を検出しました: {url}"
+        )
 
     return response.text
 
@@ -429,24 +443,43 @@ def parse_event_detail(html: str, url: str) -> dict:
 
 def fetch_event_details(
     events: list[dict],
-    limit: int = MAX_DETAIL_EVENTS,
     interval_seconds: float = 1.0,
 ) -> list[dict]:
-    """先頭20件までの詳細を、1秒以上の間隔を空けて取得する。"""
-    if limit > MAX_DETAIL_EVENTS:
-        raise ValueError(
-            f"安全確認のため、詳細ページは最大{MAX_DETAIL_EVENTS}件までです。"
-        )
+    """重複しない全イベントの詳細を、1秒以上の間隔で順番に取得する。"""
     if interval_seconds < 1.0:
         raise ValueError("詳細ページへのアクセス間隔は1秒以上にしてください。")
 
-    details = []
-    targets = events[:limit]
-    for index, event in enumerate(targets):
-        if index > 0:
+    # 一覧側のイベントIDによる重複除去を維持しつつ、同一URLへのアクセスも防ぎます。
+    targets = []
+    seen_urls = set()
+    for event in events:
+        url = event.get("url")
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        targets.append(event)
+
+    details = DetailFetchResults()
+    for index, event in enumerate(targets, start=1):
+        if index > 1:
             time.sleep(interval_seconds)
-        html = fetch_detail_page(event["url"])
-        details.append(parse_event_detail(html, event["url"]))
+
+        url = event["url"]
+        print(f"{index}/{len(targets)} 詳細ページ取得中", flush=True)
+        try:
+            html = fetch_detail_page(url)
+            details.append(parse_event_detail(html, url))
+        except AccessRestrictionError as exc:
+            reason = str(exc)
+            details.failures.append({"url": url, "reason": reason})
+            details.stopped_reason = reason
+            print(f"取得停止：{reason}", flush=True)
+            break
+        except EventFetchError as exc:
+            reason = str(exc)
+            details.failures.append({"url": url, "reason": reason})
+            print(f"詳細ページ取得失敗：{url}（{reason}）", flush=True)
+
     return details
 
 

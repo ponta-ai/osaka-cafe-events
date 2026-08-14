@@ -1,3 +1,4 @@
+import time
 from html import escape
 from pathlib import Path
 
@@ -69,6 +70,7 @@ h1 {
         url = display_value(event.get("url"))
         date = display_value(event.get("date"))
         venue = display_value(event.get("venue"))
+        address = display_value(event.get("address"))
         fee = display_value(event.get("fee"))
         capacity = display_value(event.get("capacity"))
         description = display_value(event.get("description"))
@@ -77,7 +79,8 @@ h1 {
             f"""
 <section class="event">
     <h2>{title}</h2>
-    <p><strong>開催場所：</strong>{venue}</p>
+    <p><strong>会場名：</strong>{venue}</p>
+    <p><strong>会場住所：</strong>{address}</p>
     <p><strong>開催日時：</strong>{date}</p>
     <p><strong>参加費：</strong>{fee}</p>
     <p><strong>定員：</strong>{capacity}</p>
@@ -108,23 +111,30 @@ def write_events_html(events: list[dict], output_file: Path = OUTPUT_FILE) -> No
 
 
 def main() -> int:
-    """先頭20イベントの詳細からカフェ会場だけをHTMLへ出力する。"""
+    """一覧にある全イベントの詳細からカフェ会場だけをHTMLへ出力する。"""
+    started_at = time.monotonic()
+
     try:
         events = fetch_osaka_events()
-        # 詳細ページは必ず先頭20件まで、各アクセスの間隔は1秒以上にします。
-        details = fetch_event_details(events, limit=20, interval_seconds=1.0)
     except EventFetchError as exc:
         print(f"取得エラー: {exc}")
         return 1
 
+    # 重複除去後の全イベントを対象にし、各アクセスを1秒以上空けます。
+    details = fetch_event_details(events, interval_seconds=1.0)
+
     cafe_events = filter_cafe_events(details)
     write_events_html(cafe_events)
+    elapsed_seconds = int(time.monotonic() - started_at)
+    elapsed_minutes, elapsed_seconds = divmod(elapsed_seconds, 60)
 
     print(f"一覧イベント数：{len(events)}件")
-    print(f"詳細ページ確認数：{len(details)}件")
+    print(f"詳細ページ取得成功数：{len(details)}件")
+    print(f"詳細ページ取得失敗数：{len(details.failures)}件")
     print(f"カフェ判定数：{len(cafe_events)}件")
     print(f"生成HTML：{OUTPUT_FILE}")
-    print("カフェと判定された会場名一覧：")
+    print(f"実行時間：{elapsed_minutes}分{elapsed_seconds}秒")
+    print("カフェ会場名一覧：")
     if cafe_events:
         for event in cafe_events:
             print(f"- {event.get('venue') or '不明'}")
