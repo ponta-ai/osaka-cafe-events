@@ -2,14 +2,26 @@ import json
 import time
 import unicodedata
 from typing import Optional
-from urllib.parse import urljoin, urlparse
+from urllib.parse import quote, urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup, Tag
 
 
 # 取得先やHTML解析の設定を一か所に集め、サイト側の変更に対応しやすくします。
-OSAKA_EVENTS_URL = "https://www.kokuchpro.com/s/area-%E5%A4%A7%E9%98%AA%E5%BA%9C/"
+EVENTS_BASE_URL = "https://www.kokuchpro.com/s/"
+SUPPORTED_PREFECTURES = ("大阪府", "京都府", "兵庫県")
+
+
+def prefecture_events_url(prefecture: str) -> str:
+    """対応する都道府県のイベント一覧URLを返す。"""
+    if prefecture not in SUPPORTED_PREFECTURES:
+        supported = "、".join(SUPPORTED_PREFECTURES)
+        raise ValueError(f"未対応の都道府県です: {prefecture}（対応地域: {supported}）")
+    return f"{EVENTS_BASE_URL}area-{quote(prefecture)}/"
+
+
+OSAKA_EVENTS_URL = prefecture_events_url("大阪府")
 REQUEST_TIMEOUT_SECONDS = 10
 REQUEST_HEADERS = {
     "User-Agent": (
@@ -186,7 +198,12 @@ def fetch_event_page(
     except requests.RequestException as exc:
         raise EventFetchError(f"イベント一覧の取得に失敗しました: {url} ({exc})") from exc
 
-    if response.status_code in (401, 403, 429):
+    if response.status_code in (403, 429):
+        raise AccessRestrictionError(
+            "サイトのアクセス制限によりイベント一覧を取得できませんでした: "
+            f"HTTP {response.status_code} {url}"
+        )
+    if response.status_code == 401:
         raise EventFetchError(
             "サイトのアクセス制限によりイベント一覧を取得できませんでした: "
             f"HTTP {response.status_code} {url}"
@@ -204,6 +221,12 @@ def fetch_event_page(
         raise EventFetchError(
             "イベント一覧ではない応答を受け取りました: "
             f"Content-Type={content_type or '不明'} {url}"
+        )
+
+    normalized_html = response.text.casefold()
+    if any(marker.casefold() in normalized_html for marker in ACCESS_RESTRICTION_MARKERS):
+        raise AccessRestrictionError(
+            f"CAPTCHAまたはアクセス制限画面を検出しました: {url}"
         )
 
     return response.text
@@ -444,6 +467,7 @@ def parse_event_detail(html: str, url: str) -> dict:
 def fetch_event_details(
     events: list[dict],
     interval_seconds: float = 1.0,
+    progress_prefix: str = "",
 ) -> list[dict]:
     """重複しない全イベントの詳細を、1秒以上の間隔で順番に取得する。"""
     if interval_seconds < 1.0:
@@ -465,7 +489,10 @@ def fetch_event_details(
             time.sleep(interval_seconds)
 
         url = event["url"]
-        print(f"{index}/{len(targets)} 詳細ページ取得中", flush=True)
+        print(
+            f"{progress_prefix}{index}/{len(targets)} 詳細ページ取得中",
+            flush=True,
+        )
         try:
             html = fetch_detail_page(url)
             details.append(parse_event_detail(html, url))
@@ -572,8 +599,14 @@ def parse_event_list(html: str, base_url: str = OSAKA_EVENTS_URL) -> list[dict]:
 
 def fetch_osaka_events() -> list[dict]:
     """大阪府の公開イベント一覧を1ページだけ取得して解析する。"""
-    html = fetch_event_page()
-    return parse_event_list(html)
+    return fetch_prefecture_events("大阪府")
+
+
+def fetch_prefecture_events(prefecture: str) -> list[dict]:
+    """指定した都道府県の公開イベント一覧を1ページ取得して解析する。"""
+    url = prefecture_events_url(prefecture)
+    html = fetch_event_page(url)
+    return parse_event_list(html, base_url=url)
 
 
 def print_event_preview(events: list[dict], limit: int = 5) -> None:
